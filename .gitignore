@@ -11,6 +11,7 @@ htmlcov/
 .pytest_cache
 venv/
 ubuntu-bionic-18.04-cloudimg-console.log
+google-chrome-stable_current_amd64.deb
 .vagrant/
 nginx.prod.ssl.conf
 .version
