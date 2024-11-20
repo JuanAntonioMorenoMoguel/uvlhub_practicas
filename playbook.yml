@@ -1,0 +1,129 @@
+---
+- name: Aprovisionamiento de aplicación Flask con Ansible
+  hosts: all
+  become: true
+  vars:
+    app_directory: "/home/vagrant/app"
+    env_file_path: "/home/vagrant/app/.env"
+    DATABASE_USER: flask_user
+    DATABASE_PASSWORD: flask_password
+    DATABASE_HOST: localhost
+    DATABASE_DB: tasks_db
+    MYSQL_ROOT_PASSWORD: your_root_password
+
+  tasks:
+    - name: Habilitar repositorio ppa deadsnakes
+      ansible.builtin.apt_repository:
+        repo: ppa:deadsnakes/ppa
+        state: present
+        update_cache: yes
+      when: ansible_distribution == "Ubuntu"
+
+    - name: Actualizar la caché de paquetes
+      ansible.builtin.apt:
+        update_cache: yes
+
+    - name: Instalar dependencias de sistema necesarias
+      package:
+        name:
+          - python3
+          - python3-venv
+          - python3-pip
+          - mariadb-server
+          - python3-pymysql
+          - libmariadb-dev
+          - screen
+        state: present
+
+    - name: Instalar pip y setuptools
+      shell: |
+        wget https://bootstrap.pypa.io/get-pip.py
+        python3 get-pip.py
+      args:
+        executable: /bin/bash
+      when: ansible_facts.packages['python3-pip'] is not defined
+
+    - name: Iniciar y habilitar MariaDB
+      service:
+        name: mariadb
+        state: started
+        enabled: yes
+
+    - name: Configurar autenticación root
+      mysql_user:
+        login_unix_socket: /var/run/mysqld/mysqld.sock
+        login_user: root
+        login_password: ''
+        name: root
+        password: "{{ MYSQL_ROOT_PASSWORD }}"
+        state: present
+        plugin: mysql_native_password
+
+    - name: Crear base de datos
+      community.mysql.mysql_db:
+        name: "{{ DATABASE_DB }}"
+        state: present
+        login_user: root
+        login_password: "{{ MYSQL_ROOT_PASSWORD }}"
+        login_unix_socket: /var/run/mysqld/mysqld.sock
+
+    - name: Crear usuario y otorgar privilegios
+      mysql_user:
+        name: "{{ DATABASE_USER }}"
+        password: "{{ DATABASE_PASSWORD }}"
+        priv: "{{ DATABASE_DB }}.*:ALL"
+        host: localhost
+        login_user: root
+        login_password: "{{ MYSQL_ROOT_PASSWORD }}"
+        login_unix_socket: /var/run/mysqld/mysqld.sock
+        state: present
+        plugin: mysql_native_password
+
+    - name: Eliminar entorno virtual si existe
+      file:
+        path: "{{ app_directory }}/venv"
+        state: absent
+        force: yes
+
+    - name: Crear entorno virtual
+      command: python3 -m venv {{ app_directory }}/venv
+      args:
+        creates: "{{ app_directory }}/venv/bin/activate"
+
+    - name: Actualizar pip en entorno virtual
+      shell: |
+        source {{ app_directory }}/venv/bin/activate
+        pip install --upgrade pip
+      args:
+        executable: /bin/bash
+
+    - name: Instalar dependencias Python
+      pip:
+        requirements: "{{ app_directory }}/requirements.txt"
+        virtualenv: "{{ app_directory }}/venv"
+        virtualenv_python: python3
+
+    - name: Copiar archivo .env
+      copy:
+        src: "{{ playbook_dir }}/.env"
+        dest: "{{ app_directory }}/.env"
+        owner: vagrant
+        group: vagrant
+        mode: '0640'
+
+    - name: Configurar permisos directorio
+      file:
+        path: "{{ app_directory }}"
+        owner: vagrant
+        group: vagrant
+        recurse: yes
+
+    - name: Lanzar aplicación Flask
+      shell: |
+        screen -m -d -S flask_app bash -c "source {{ app_directory }}/venv/bin/activate && {{ app_directory }}/venv/bin/python3 {{ app_directory }}/app.py"
+      args:
+        executable: /bin/bash
+
+    - name: Mensaje final
+      debug:
+        msg: "¡Aprovisionamiento completado y aplicación lanzada en http://localhost:8080!"
